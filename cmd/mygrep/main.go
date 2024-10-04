@@ -2,10 +2,12 @@
 package main
 
 import (
-    "bufio"
-    "fmt"
-    "os"
-    "github.com/codecrafters-io/grep-starter-go/internal/matcher"
+	"bufio"
+	"fmt"
+	"os"
+	"strings"
+
+	"github.com/codecrafters-io/grep-starter-go/internal/matcher"
 )
 
 func main() {
@@ -17,15 +19,27 @@ func main() {
     pattern := os.Args[2]
     
     scanner := bufio.NewScanner(os.Stdin)
-    digitMatcher := matcher.DigitMatcher{}
-    alphanumericMatcher := matcher.AlphanumericMatcher{}
-    matchFound := false
+    var m matcher.Matcher
+    
+    if strings.HasPrefix(pattern, "[^") && strings.HasSuffix(pattern, "]") {
+        m = matcher.NegativeCharGroupMatcher{}
+    } else if strings.HasPrefix(pattern, "[") && strings.HasSuffix(pattern, "]") {
+        m = matcher.PositiveCharGroupMatcher{}
+    } else if pattern == "\\w" {
+        m = matcher.AlphanumericMatcher{}
+    } else if pattern == "\\d" {
+        m = matcher.DigitMatcher{}
+    } else {
+        m = matcher.LiteralMatcher{}
+    }
 
+
+    matchFound := false
     for scanner.Scan() {
         line := scanner.Bytes()
-        if digitMatcher.Match(line, pattern) || alphanumericMatcher.Match(line, pattern) {
-            fmt.Println(string(line))
+        if m.Match(line, pattern) {
             matchFound = true
+            break
         }
     }
 
@@ -36,5 +50,8 @@ func main() {
 
     if !matchFound {
         os.Exit(1)
+    } else {
+        os.Exit(0)
     }
+    
 }

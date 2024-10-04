@@ -1,7 +1,12 @@
 package matcher
 
-import "bytes"
+import (
+	"bytes"
+    
+)
 
-func MatchLiteral(line []byte, pattern string) bool {
+type LiteralMatcher struct{}
+
+func (lm LiteralMatcher) Match(line []byte, pattern string) bool {
     return bytes.Contains(line, []byte(pattern))
 }
