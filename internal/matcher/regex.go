@@ -19,7 +19,12 @@ func (rm RegexMatcher) Match(line []byte, pattern string) bool {
 
 		// If the pattern starts with $, it must match at the end of the line
 		return bytes.HasSuffix(line, []byte(strings.TrimSuffix(pattern, "$")))
-	} else if strings.Contains(pattern, "+") || strings.Contains(pattern, "?") {
+		
+	} else if strings.Contains(pattern, "(") && strings.Contains(pattern, "|") {
+
+		return matchAlternation(line, pattern)
+
+	}  else if strings.Contains(pattern, "+") || strings.Contains(pattern, "?") {
 		return matchRegex(line, []byte(pattern))
 	}
 
@@ -88,7 +93,7 @@ func matchRegex(text, pattern []byte) bool {
 				return matchRegex(text[1:], pattern[1:])
 			}
 		}
-		
+
 		if text[0] == pattern[0] || pattern[0] == '.' {
 			return matchRegex(text[1:], pattern[1:])
 		}
@@ -96,7 +101,25 @@ func matchRegex(text, pattern []byte) bool {
 		return matchRegex(text[1:], pattern)
 }
 
+func matchAlternation(text []byte, pattern string) bool {
 
+	parts := strings.SplitN(pattern, "(", 2)
+	prefix := parts[0]
+
+	if len (parts) < 2 {
+		return bytes.Contains(text, []byte(pattern))
+	}
+
+	alternatives := strings.Split(strings.TrimSuffix(parts[1], ")"), "|")
+
+	for _, alt := range alternatives {
+		fullPattern := prefix + alt
+		if bytes.Contains(text, []byte(fullPattern)) {
+			return true
+		}
+	}
+	return false
+}
 func matchStartOfLine(text, pattern []byte) bool {
 
 	return matchRegex(text, pattern)
