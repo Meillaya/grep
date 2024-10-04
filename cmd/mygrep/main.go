@@ -2,12 +2,10 @@
 package main
 
 import (
+    "bufio"
     "fmt"
     "os"
-    // "unicode/utf8"
     "github.com/codecrafters-io/grep-starter-go/internal/matcher"
-    // "github.com/codecrafters-io/grep-starter-go/internal/io"
-	"bufio"
 )
 
 func main() {
@@ -19,10 +17,13 @@ func main() {
     pattern := os.Args[2]
     
     scanner := bufio.NewScanner(os.Stdin)
+    digitMatcher := matcher.DigitMatcher{}
+    alphanumericMatcher := matcher.AlphanumericMatcher{}
     matchFound := false
+
     for scanner.Scan() {
         line := scanner.Bytes()
-        if matcher.MatchLiteral(line, pattern) {
+        if digitMatcher.Match(line, pattern) || alphanumericMatcher.Match(line, pattern) {
             fmt.Println(string(line))
             matchFound = true
         }
