@@ -5,8 +5,6 @@ import (
 	"bufio"
 	"fmt"
 	"os"
-	"strings"
-
 	"github.com/codecrafters-io/grep-starter-go/internal/matcher"
 )
 
@@ -19,25 +17,13 @@ func main() {
     pattern := os.Args[2]
     
     scanner := bufio.NewScanner(os.Stdin)
-    var m matcher.Matcher
-    
-    if strings.HasPrefix(pattern, "[^") && strings.HasSuffix(pattern, "]") {
-        m = matcher.NegativeCharGroupMatcher{}
-    } else if strings.HasPrefix(pattern, "[") && strings.HasSuffix(pattern, "]") {
-        m = matcher.PositiveCharGroupMatcher{}
-    } else if pattern == "\\w" {
-        m = matcher.AlphanumericMatcher{}
-    } else if pattern == "\\d" {
-        m = matcher.DigitMatcher{}
-    } else {
-        m = matcher.LiteralMatcher{}
-    }
-
-
+    regexMatcher := matcher.RegexMatcher{}
     matchFound := false
+
+
     for scanner.Scan() {
         line := scanner.Bytes()
-        if m.Match(line, pattern) {
+        if regexMatcher.Match(line, pattern){
             matchFound = true
             break
         }
