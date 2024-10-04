@@ -2,6 +2,7 @@ package matcher
 
 import (
 	"bytes"
+	"strings"
 	"unicode"
 )
 
@@ -9,6 +10,18 @@ type RegexMatcher struct {}
 
 
 func (rm RegexMatcher) Match(line []byte, pattern string) bool {
+
+	if strings.HasPrefix(pattern, "^") {
+		// If the pattern starts with ^, it must match at the beginning of the line
+        return bytes.HasPrefix(line, []byte(pattern[1:]))
+
+	} else if strings.HasSuffix(pattern, "$") {
+
+		// If the pattern starts with $, it must match at the end of the line
+		return bytes.HasSuffix(line, []byte(strings.TrimSuffix(pattern, "$")))
+	}
+
+	//For patterns without ^ or $, use existing logic
 	return matchRegex(line, []byte(pattern))
 }
 
@@ -21,7 +34,14 @@ func matchRegex(text, pattern []byte) bool {
 		return false
 	}
 
+	if pattern[0] == '^' {
+		return matchStartOfLine(text, pattern[1:])
+	}
+
 	switch pattern[0] {
+	case '$':
+		//We should be at the end of the text
+		return len(pattern) == 1 && len(text) == 0	
 	case '\\':
 		if len(pattern) > 1 {
 			switch pattern[1] {
@@ -52,6 +72,13 @@ func matchRegex(text, pattern []byte) bool {
 
 		return matchRegex(text[1:], pattern)
 }
+
+func matchStartOfLine(text, pattern []byte) bool {
+
+	return matchRegex(text, pattern)
+}
+
+
 func matchPositveCharGroup(text []byte, pattern []byte) bool {
 
 	end := bytes.IndexByte(pattern, ']')
@@ -70,7 +97,7 @@ func matchPositveCharGroup(text []byte, pattern []byte) bool {
 }
 
 func matchNegativeCharGroup(text []byte, pattern []byte) bool {
-	
+
 	end := bytes.IndexByte(pattern, ']')
 
 	if end == - 1 {
