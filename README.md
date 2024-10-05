@@ -17,7 +17,7 @@ expressions are evaluated.
 
 # Implementation
 
-This repo is serves to document my progress in constructing a complete regex engine written from scratch in Go.
+This repository serves to document my progress in constructing a complete regex engine written from scratch in Go.
 This is beyond the scope of what I initiall wanted to achieve with this project, however I believe it will be an integral learning experience.
 
 ## Features
