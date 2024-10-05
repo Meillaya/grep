@@ -9,3 +9,5 @@
 module github.com/codecrafters-io/grep-starter-go
 
 go 1.22
+
+require github.com/dlclark/regexp2 v1.11.4 // indirect
