@@ -1,0 +1,497 @@
+package matcher
+
+import (
+	"bytes"
+	"errors"
+	"strings"
+	"unicode"
+	"strconv"
+)
+
+// RegexMatcher is the main struct for regex matching.
+type RegexMatcher struct {
+	memo map[string]bool // Memoization cache
+}
+
+// Match determines if the line matches the given pattern.
+func (rm *RegexMatcher) Match(line []byte, pattern string) bool {
+	// Initialize memoization cache
+	rm.memo = make(map[string]bool)
+	err := validatePattern(pattern)
+	if err != nil {
+		// Handle invalid pattern gracefully
+		return false
+	}
+	return matchRegex(line, []byte(pattern), [][]byte{}, rm)
+}
+
+// validatePattern checks for balanced parentheses and brackets.
+func validatePattern(pattern string) error {
+	var stack []rune
+	for _, ch := range pattern {
+		switch ch {
+		case '(', '[':
+			stack = append(stack, ch)
+		case ')':
+			if len(stack) == 0 || stack[len(stack)-1] != '(' {
+				return errors.New("unbalanced parentheses")
+			}
+			stack = stack[:len(stack)-1]
+		case ']':
+			if len(stack) == 0 || stack[len(stack)-1] != '[' {
+				return errors.New("unbalanced brackets")
+			}
+			stack = stack[:len(stack)-1]
+		}
+	}
+	if len(stack) != 0 {
+		return errors.New("unbalanced pattern")
+	}
+	return nil
+}
+
+// matchRegex recursively matches the text against the pattern with captures and memoization.
+func matchRegex(text []byte, pattern []byte, captures [][]byte, rm *RegexMatcher) bool {
+	// Create a unique key for memoization based on current text and pattern
+	key := string(text) + "|" + string(pattern) + "|" + capturesKey(captures)
+	if val, exists := rm.memo[key]; exists {
+		return val
+	}
+
+	// Base case: If pattern is empty, text must also be empty for a match.
+	if len(pattern) == 0 {
+		rm.memo[key] = len(text) == 0
+		return len(text) == 0
+	}
+
+	// Handle end anchor '$'
+	if pattern[0] == '$' {
+		rm.memo[key] = len(text) == 0
+		return len(text) == 0
+	}
+
+	// Handle start anchor '^'
+	if pattern[0] == '^' {
+		match := matchRegex(text, pattern[1:], captures, rm)
+		rm.memo[key] = match
+		return match
+	}
+
+	// If text is empty but pattern is not (and not able to match empty), return false.
+	if len(text) == 0 {
+		rm.memo[key] = false
+		return false
+	}
+
+	var match bool
+
+	// Check if there's a quantifier following the current pattern
+	var quantifier byte
+	if len(pattern) > 1 && (pattern[1] == '*' || pattern[1] == '+' || pattern[1] == '?') {
+		quantifier = pattern[1]
+	} else if len(pattern) > 4 && pattern[1] == '{' { // Simple handling for {n}
+		braceIndex := bytes.IndexByte(pattern[1:], '}') 
+		if braceIndex != -1 && braceIndex+1 < len(pattern) {
+			quantifier = pattern[braceIndex+1]
+		}
+	}
+
+	switch pattern[0] {
+	case '(':
+		closingParen := findClosingParen(pattern)
+		if closingParen == -1 {
+			// Malformed pattern
+			rm.memo[key] = false
+			return false
+		}
+		subPattern := pattern[1:closingParen]
+
+		// Iterate through all possible splits for the capturing group
+		for i := 0; i <= len(text); i++ {
+			if matchRegex(text[:i], subPattern, nil, rm) {
+				newCaptures := append(captures, text[:i])
+				if matchRegex(text[i:], pattern[closingParen+1:], newCaptures, rm) {
+					rm.memo[key] = true
+					return true
+				}
+			}
+		}
+		rm.memo[key] = false
+		return false
+
+	case '\\':
+		if len(pattern) < 2 {
+			rm.memo[key] = false
+			return false
+		}
+		switch pattern[1] {
+		case 'w':
+			if isWord(rune(text[0])) {
+				if len(pattern) > 2 && pattern[2] == '+' {
+					// Handle \w+ quantifier
+					i := 1
+					for i < len(text) && isWord(rune(text[i])) {
+						i++
+					}
+					// Match one or more word characters
+					if i == 0 {
+						rm.memo[key] = false
+						return false
+					}
+					match = matchRegex(text[i:], pattern[3:], captures, rm)
+					rm.memo[key] = match
+					return match
+				} else if len(pattern) > 2 && pattern[2] == '*' {
+					// Handle \w* quantifier
+					i := 0
+					for i < len(text) && isWord(rune(text[i])) {
+						i++
+					}
+					match = matchRegex(text[i:], pattern[3:], captures, rm)
+					rm.memo[key] = match
+					return match
+				} else if len(pattern) > 2 && pattern[2] == '?' {
+					// Handle \w? quantifier
+					if isWord(rune(text[0])) {
+						match = matchRegex(text[1:], pattern[3:], captures, rm)
+					} else {
+						match = matchRegex(text, pattern[3:], captures, rm)
+					}
+					rm.memo[key] = match
+					return match
+				} else {
+					// No quantifier
+					match = matchRegex(text[1:], pattern[2:], captures, rm)
+					rm.memo[key] = match
+					return match
+				}
+			}
+			rm.memo[key] = false
+			return false
+
+		case 'd':
+			if unicode.IsDigit(rune(text[0])) {
+				if len(pattern) > 2 && pattern[2] == '+' {
+					// Handle \d+ quantifier
+					i := 1
+					for i < len(text) && unicode.IsDigit(rune(text[i])) {
+						i++
+					}
+					if i == 0 {
+						rm.memo[key] = false
+						return false
+					}
+					match = matchRegex(text[i:], pattern[3:], captures, rm)
+					rm.memo[key] = match
+					return match
+				} else if len(pattern) > 2 && pattern[2] == '*' {
+					// Handle \d* quantifier
+					i := 0
+					for i < len(text) && unicode.IsDigit(rune(text[i])) {
+						i++
+					}
+					match = matchRegex(text[i:], pattern[3:], captures, rm)
+					rm.memo[key] = match
+					return match
+				} else if len(pattern) > 2 && pattern[2] == '?' {
+					// Handle \d? quantifier
+					if unicode.IsDigit(rune(text[0])) {
+						match = matchRegex(text[1:], pattern[3:], captures, rm)
+					} else {
+						match = matchRegex(text, pattern[3:], captures, rm)
+					}
+					rm.memo[key] = match
+					return match
+				} else {
+					// No quantifier
+					match = matchRegex(text[1:], pattern[2:], captures, rm)
+					rm.memo[key] = match
+					return match
+				}
+			}
+			rm.memo[key] = false
+			return false
+
+		case '1', '2', '3', '4', '5', '6', '7', '8', '9':
+			// Handle backreferences like \1, \2, etc.
+			captureIndex, _ := strconv.Atoi(string(pattern[1]))
+			if captureIndex > 0 && captureIndex <= len(captures) {
+				capture := captures[captureIndex-1]
+				if bytes.HasPrefix(text, capture) {
+					match = matchRegex(text[len(capture):], pattern[2:], captures, rm)
+					rm.memo[key] = match
+					return match
+				}
+			}
+			rm.memo[key] = false
+			return false
+
+		default:
+			// Unsupported escape sequence
+			rm.memo[key] = false
+			return false
+		}
+
+	case '[':
+		closingBracket := findClosingBracket(pattern)
+		if closingBracket == -1 {
+			// Malformed character class
+			rm.memo[key] = false
+			return false
+		}
+		isNegated := false
+		start := 1
+		if pattern[1] == '^' {
+			isNegated = true
+			start = 2
+		}
+		chars := pattern[start:closingBracket]
+		remainingPattern := pattern[closingBracket+1:]
+
+		// Handle quantifiers after character class
+		if len(remainingPattern) > 0 && (remainingPattern[0] == '*' || remainingPattern[0] == '+' || remainingPattern[0] == '?') {
+			quant := remainingPattern[0]
+			remainingPattern = remainingPattern[1:]
+			switch quant {
+			case '*':
+				// Match zero or more of the character class
+				i := 0
+				for i < len(text) && matchChar(text[i], chars, isNegated) {
+					i++
+				}
+				match = matchRegex(text[i:], remainingPattern, captures, rm)
+				rm.memo[key] = match
+				return match
+			case '+':
+				// Match one or more of the character class
+				i := 0
+				for i < len(text) && matchChar(text[i], chars, isNegated) {
+					i++
+				}
+				if i == 0 {
+					rm.memo[key] = false
+					return false
+				}
+				match = matchRegex(text[i:], remainingPattern, captures, rm)
+				rm.memo[key] = match
+				return match
+			case '?':
+				// Match zero or one of the character class
+				if matchChar(text[0], chars, isNegated) {
+					match = matchRegex(text[1:], remainingPattern, captures, rm)
+					if match {
+						rm.memo[key] = true
+						return true
+					}
+				}
+				// Try matching zero occurrence
+				match = matchRegex(text, remainingPattern, captures, rm)
+				rm.memo[key] = match
+				return match
+			}
+		}
+
+		// No quantifier, match single character from character class
+		if matchChar(text[0], chars, isNegated) {
+			match = matchRegex(text[1:], remainingPattern, captures, rm)
+			rm.memo[key] = match
+			return match
+		}
+		rm.memo[key] = false
+		return false
+
+	case '.':
+		// Handle '.' wildcard (matches any single character)
+		if len(text) == 0 {
+			rm.memo[key] = false
+			return false
+		}
+		// Handle quantifiers after '.'
+		if len(pattern) >1 && (pattern[1] == '*' || pattern[1] == '+' || pattern[1] == '?') {
+			quant := pattern[1]
+			remainingPattern := pattern[2:]
+			switch quant {
+			case '*':
+				// Match zero or more of any character
+				i := 0
+				for i < len(text) {
+					i++
+				}
+				// Try all possible matches from the current position
+				for j := i; j >=0; j-- {
+					if matchRegex(text[j:], remainingPattern, captures, rm) {
+						rm.memo[key] = true
+						return true
+					}
+				}
+				rm.memo[key] = false
+				return false
+			case '+':
+				// Match one or more of any character
+				i :=1
+				for i <= len(text) {
+					if matchRegex(text[i:], remainingPattern, captures, rm) {
+						rm.memo[key] = true
+						return true
+					}
+					i++
+				}
+				rm.memo[key] = false
+				return false
+			case '?':
+				// Match zero or one of any character
+				if matchRegex(text[1:], remainingPattern, captures, rm) {
+					rm.memo[key] = true
+					return true
+				}
+				// Try matching zero occurrence
+				match = matchRegex(text, remainingPattern, captures, rm)
+				rm.memo[key] = match
+				return match
+			}
+		} else {
+			// No quantifier, match single character
+			match = matchRegex(text[1:], pattern[1:], captures, rm)
+			rm.memo[key] = match
+			return match
+		}
+
+	case '+', '*', '?':
+		// Quantifiers should be handled in their respective cases
+		rm.memo[key] = false
+		return false
+
+	default:
+		// Match literal character
+		if pattern[0] == text[0] {
+			// Handle quantifiers after literal
+			if len(pattern) >1 && (pattern[1] == '*' || pattern[1] == '+' || pattern[1] == '?') {
+				quant := pattern[1]
+				remainingPattern := pattern[2:]
+				switch quant {
+				case '*':
+					// Match zero or more of the literal character
+					i := 0
+					for i < len(text) && text[i] == pattern[0] {
+						i++
+					}
+					// Try all possible matches from the current position
+					for j := i; j >=0; j-- {
+						if matchRegex(text[j:], remainingPattern, captures, rm) {
+							rm.memo[key] = true
+							return true
+						}
+					}
+					rm.memo[key] = false
+					return false
+				case '+':
+					// Match one or more of the literal character
+					i :=1
+					for i <= len(text) && text[i-1] == pattern[0] {
+						if matchRegex(text[i:], remainingPattern, captures, rm) {
+							rm.memo[key] = true
+							return true
+						}
+						i++
+					}
+					rm.memo[key] = false
+					return false
+				case '?':
+					// Match zero or one of the literal character
+					if text[0] == pattern[0] {
+						if matchRegex(text[1:], remainingPattern, captures, rm) {
+							rm.memo[key] = true
+							return true
+						}
+					}
+					// Try matching zero occurrence
+					match = matchRegex(text, remainingPattern, captures, rm)
+					rm.memo[key] = match
+					return match
+				}
+			} else {
+				// No quantifier, match single character
+				match = matchRegex(text[1:], pattern[1:], captures, rm)
+				rm.memo[key] = match
+				return match
+			}
+		}
+		rm.memo[key] = false
+		return false
+	}
+
+	rm.memo[key] = false
+	return false
+}
+
+// capturesKey generates a unique key for the current captures to use in memoization.
+func capturesKey(captures [][]byte) string {
+	var parts []string
+	for _, cap := range captures {
+		parts = append(parts, string(cap))
+	}
+	return strings.Join(parts, "|")
+}
+
+// findClosingParen finds the index of the matching closing parenthesis.
+func findClosingParen(pattern []byte) int {
+	count := 0
+	for i, ch := range pattern {
+		if ch == '(' {
+			count++
+		} else if ch == ')' {
+			count--
+			if count == 0 {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+// findClosingBracket finds the index of the matching closing bracket.
+func findClosingBracket(pattern []byte) int {
+	for i, ch := range pattern {
+		if ch == ']' {
+			return i
+		}
+	}
+	return -1
+}
+
+// matchAlternation handles patterns with alternation using '|'.
+func matchAlternation(text []byte, pattern string, captures [][]byte, rm *RegexMatcher) bool {
+	parts := strings.SplitN(pattern, "|", 2)
+	for _, alt := range parts {
+		if matchRegex(text, []byte(alt), captures, rm) {
+			return true
+		}
+	}
+	return false
+}
+
+// matchChar checks if a character matches the character class.
+func matchChar(c byte, chars []byte, isNegated bool) bool {
+	contains := bytes.Contains(chars, []byte{c})
+	if isNegated {
+		return !contains
+	}
+	return contains
+}
+
+// matchPositveCharGroup matches positive character groups like [abc].
+func matchPositveCharGroup(text []byte, pattern []byte, captures [][]byte) bool {
+	// Not used in the current enhanced implementation
+	return false
+}
+
+// matchNegativeCharGroup matches negative character groups like [^abc].
+func matchNegativeCharGroup(text []byte, pattern []byte, captures [][]byte) bool {
+	// Not used in the current enhanced implementation
+	return false
+}
+
+// isWord checks if a rune is a word character.
+func isWord(r rune) bool {
+	return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_'
+}

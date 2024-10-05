@@ -17,13 +17,17 @@ func main() {
     pattern := os.Args[2]
     
     scanner := bufio.NewScanner(os.Stdin)
-    regexMatcher := matcher.RegexMatcher{}
+
+    regexMatcher, err := matcher.NewRegexMatcher(pattern)
+    if err != nil {
+        fmt.Fprintf(os.Stderr, "error compiling regex: %v\n", err)
+        os.Exit(1)
+    }
     matchFound := false
 
-
     for scanner.Scan() {
-        line := scanner.Bytes()
-        if regexMatcher.Match(line, pattern){
+        line := scanner.Text()
+        if regexMatcher.Match([]byte(line), line) {
             matchFound = true
             break
         }
@@ -39,5 +43,4 @@ func main() {
     } else {
         os.Exit(0)
     }
-    
 }
